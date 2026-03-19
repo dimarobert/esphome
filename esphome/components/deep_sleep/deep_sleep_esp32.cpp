@@ -126,7 +126,9 @@ void DeepSleepComponent::deep_sleep_() {
   // GPIO wakeup - C2, C3, C6, C61 only
 #if defined(USE_ESP32_VARIANT_ESP32C2) || defined(USE_ESP32_VARIANT_ESP32C3) || defined(USE_ESP32_VARIANT_ESP32C6) || \
     defined(USE_ESP32_VARIANT_ESP32C61)
-  if (this->wakeup_pin_ != nullptr) {
+  if (this->gpio_wakeup_.has_value()) {
+    esp_deep_sleep_enable_gpio_wakeup(this->gpio_wakeup_->mask, this->gpio_wakeup_->wakeup_mode);
+  } else if (this->wakeup_pin_ != nullptr) {
     const auto gpio_pin = gpio_num_t(this->wakeup_pin_->get_pin());
     // Make sure GPIO is in input mode, not all RTC GPIO pins are input by default
     gpio_set_direction(gpio_pin, GPIO_MODE_INPUT);

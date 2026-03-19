@@ -51,6 +51,13 @@ struct Ext1Wakeup {
 };
 #endif
 
+#if defined(USE_ESP32) && defined(USE_ESP32_VARIANT_ESP32C3)
+struct GpioWakeup {
+  uint64_t mask;
+  esp_deepsleep_gpio_wake_up_mode_t wakeup_mode;
+};
+#endif
+
 struct WakeupCauseToRunDuration {
   // Run duration if woken up by timer or any other reason besides those below.
   uint32_t default_cause;
@@ -83,6 +90,8 @@ class DeepSleepComponent : public Component {
   void set_wakeup_pin(InternalGPIOPin *pin) { this->wakeup_pin_ = pin; }
 
   void set_wakeup_pin_mode(WakeupPinMode wakeup_pin_mode);
+
+  void set_gpio_wakeup(GpioWakeup gpio_wakeup) { this->gpio_wakeup_ = gpio_wakeup; }
 #endif  // USE_ESP32
 
 #if defined(USE_BK72XX)
@@ -147,6 +156,8 @@ class DeepSleepComponent : public Component {
 #ifdef USE_ESP32
   InternalGPIOPin *wakeup_pin_{nullptr};
   WakeupPinMode wakeup_pin_mode_{WAKEUP_PIN_MODE_IGNORE};
+
+  optional<GpioWakeup> gpio_wakeup_;
 
 #if !defined(USE_ESP32_VARIANT_ESP32C2) && !defined(USE_ESP32_VARIANT_ESP32C3)
   optional<Ext1Wakeup> ext1_wakeup_;
