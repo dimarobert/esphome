@@ -33,28 +33,19 @@ enum WakeupPinMode {
    */
   WAKEUP_PIN_MODE_INVERT_WAKEUP,
 };
-#endif
 
-#if defined(USE_BK72XX)
 struct WakeUpPinItem {
   InternalGPIOPin *wakeup_pin;
   WakeupPinMode wakeup_pin_mode;
   bool wakeup_level;
 };
-#endif  // USE_BK72XX
+#endif  // USE_ESP32 || USE_BK72XX
 
 #ifdef USE_ESP32
 #if defined(USE_ESP32) && !defined(USE_ESP32_VARIANT_ESP32C2) && !defined(USE_ESP32_VARIANT_ESP32C3)
 struct Ext1Wakeup {
   uint64_t mask;
   esp_sleep_ext1_wakeup_mode_t wakeup_mode;
-};
-#endif
-
-#if defined(USE_ESP32) && defined(USE_ESP32_VARIANT_ESP32C3)
-struct GpioWakeup {
-  uint64_t mask;
-  esp_deepsleep_gpio_wake_up_mode_t wakeup_mode;
 };
 #endif
 
@@ -90,16 +81,14 @@ class DeepSleepComponent : public Component {
   void set_wakeup_pin(InternalGPIOPin *pin) { this->wakeup_pin_ = pin; }
 
   void set_wakeup_pin_mode(WakeupPinMode wakeup_pin_mode);
-
-  void set_gpio_wakeup(GpioWakeup gpio_wakeup) { this->gpio_wakeup_ = gpio_wakeup; }
 #endif  // USE_ESP32
 
-#if defined(USE_BK72XX)
+#if defined(USE_ESP32) || defined(USE_BK72XX)
   void init_wakeup_pins_(size_t capacity) { this->wakeup_pins_.init(capacity); }
   void add_wakeup_pin(InternalGPIOPin *wakeup_pin, WakeupPinMode wakeup_pin_mode) {
     this->wakeup_pins_.emplace_back(WakeUpPinItem{wakeup_pin, wakeup_pin_mode, !wakeup_pin->is_inverted()});
   }
-#endif  // USE_BK72XX
+#endif  // USE_ESP32 || USE_BK72XX
 
 #if defined(USE_ESP32)
 #if !defined(USE_ESP32_VARIANT_ESP32C2) && !defined(USE_ESP32_VARIANT_ESP32C3)
@@ -149,15 +138,13 @@ class DeepSleepComponent : public Component {
 
   optional<uint64_t> sleep_duration_;
 
-#ifdef USE_BK72XX
+#if defined(USE_ESP32) || defined(USE_BK72XX)
   FixedVector<WakeUpPinItem> wakeup_pins_;
-#endif  // USE_BK72XX
+#endif  // USE_ESP32 || USE_BK72XX
 
 #ifdef USE_ESP32
   InternalGPIOPin *wakeup_pin_{nullptr};
   WakeupPinMode wakeup_pin_mode_{WAKEUP_PIN_MODE_IGNORE};
-
-  optional<GpioWakeup> gpio_wakeup_;
 
 #if !defined(USE_ESP32_VARIANT_ESP32C2) && !defined(USE_ESP32_VARIANT_ESP32C3)
   optional<Ext1Wakeup> ext1_wakeup_;

@@ -153,7 +153,6 @@ def validate_config(config: ConfigType) -> ConfigType:
     if CONF_WAKEUP_PIN_MODE in config and CONF_WAKEUP_PIN not in config:
         raise cv.Invalid(f"{CONF_WAKEUP_PIN_MODE} requires {CONF_WAKEUP_PIN} to be specified")
 
-    # right now only BK72XX supports the list format for wakeup pins
     if CORE.is_bk72xx:
         if CONF_WAKEUP_PIN_MODE in config:
             wakeup_pins = config.get(CONF_WAKEUP_PIN, [])
@@ -163,6 +162,30 @@ def validate_config(config: ConfigType) -> ConfigType:
                 )
             if wakeup_pins:
                 wakeup_pins[0][CONF_WAKEUP_PIN_MODE] = config.pop(CONF_WAKEUP_PIN_MODE)
+    elif CORE.is_esp32:
+        wakeup_pins = config.get(CONF_WAKEUP_PIN, [])
+        if len(wakeup_pins) > 1:
+            if CONF_WAKEUP_PIN_MODE in config:
+                raise cv.Invalid(
+                    "You need to remove the global wakeup_pin_mode and define it per pin"
+                )
+            esp32.only_on_variant(
+                supported=[
+                    VARIANT_ESP32C2,
+                    VARIANT_ESP32C3,
+                    VARIANT_ESP32C6,
+                    VARIANT_ESP32C61,
+                ],
+                msg_prefix="Multiple wakeup pins",
+            )(wakeup_pins)
+            # INVERT_WAKEUP is not possible with multiple pins because
+            # the GPIO wakeup API requires a single level for all pins
+            invert = WAKEUP_PIN_MODES["INVERT_WAKEUP"]
+            for pin_conf in wakeup_pins:
+                if pin_conf.get(CONF_WAKEUP_PIN_MODE) is invert:
+                    raise cv.Invalid(
+                        "INVERT_WAKEUP is not supported with multiple wakeup pins"
+                    )
     elif (
         isinstance(config.get(CONF_WAKEUP_PIN), list)
         and len(config[CONF_WAKEUP_PIN]) > 1
@@ -216,13 +239,6 @@ AllowDeepSleepAction = deep_sleep_ns.class_(
     cg.Parented.template(DeepSleepComponent),
 )
 
-esp_deepsleep_gpio_wake_up_mode_t = cg.global_ns.enum("esp_deepsleep_gpio_wake_up_mode_t")
-GpioWakeup = deep_sleep_ns.struct("GpioWakeup")
-GPIO_WAKEUP_MODES = {
-    "LOW": esp_deepsleep_gpio_wake_up_mode_t.ESP_GPIO_WAKEUP_GPIO_LOW,
-    "HIGH": esp_deepsleep_gpio_wake_up_mode_t.ESP_GPIO_WAKEUP_GPIO_HIGH
-}
-
 WakeupPinMode = deep_sleep_ns.enum("WakeupPinMode")
 WAKEUP_PIN_MODES = {
     "IGNORE": WakeupPinMode.WAKEUP_PIN_MODE_IGNORE,
@@ -239,7 +255,6 @@ EXT1_WAKEUP_MODES = {
 }
 WakeupCauseToRunDuration = deep_sleep_ns.struct("WakeupCauseToRunDuration")
 
-CONF_GPIO_WAKEUP = "gpio_wakeup"
 CONF_WAKEUP_PIN_MODE = "wakeup_pin_mode"
 CONF_ESP32_EXT1_WAKEUP = "esp32_ext1_wakeup"
 CONF_TOUCH_WAKEUP = "touch_wakeup"
@@ -274,23 +289,11 @@ CONFIG_SCHEMA = cv.All(
                 cv.positive_time_period_milliseconds,
                 _validate_sleep_duration,
             ),
-            cv.Exclusive(CONF_WAKEUP_PIN, CONF_WAKEUP_PIN): validate_wakeup_pin,
+            cv.Optional(CONF_WAKEUP_PIN): validate_wakeup_pin,
             cv.Optional(CONF_WAKEUP_PIN_MODE): cv.All(
                 cv.only_on([PLATFORM_ESP32, PLATFORM_BK72XX]),
                 cv.enum(WAKEUP_PIN_MODES),
                 upper=True,
-            ),
-            cv.Exclusive(CONF_GPIO_WAKEUP, CONF_WAKEUP_PIN): cv.All(
-                cv.only_on_esp32,
-                cv.Schema(
-                    {
-                        cv.Required(CONF_PINS): cv.ensure_list(
-                            pins.internal_gpio_input_pin_schema,
-                            validate_pin_number_esp32,
-                        ),
-                        cv.Required(CONF_MODE): cv.enum(GPIO_WAKEUP_MODES, upper=True),
-                    }
-                ),
             ),
             cv.Optional(CONF_ESP32_EXT1_WAKEUP): cv.All(
                 cv.only_on_esp32,
@@ -341,7 +344,7 @@ async def to_code(config):
         cg.add(var.set_sleep_duration(config[CONF_SLEEP_DURATION]))
     if CONF_WAKEUP_PIN in config:
         pins_as_list = config.get(CONF_WAKEUP_PIN, [])
-        if CORE.is_bk72xx:
+        if CORE.is_bk72xx or (CORE.is_esp32 and len(pins_as_list) > 1):
             cg.add(var.init_wakeup_pins_(len(pins_as_list)))
             for item in pins_as_list:
                 cg.add(
@@ -357,15 +360,6 @@ async def to_code(config):
             cg.add(var.set_wakeup_pin(pin))
     if CONF_WAKEUP_PIN_MODE in config:
         cg.add(var.set_wakeup_pin_mode(config[CONF_WAKEUP_PIN_MODE]))
-    if CONF_GPIO_WAKEUP in config:
-        conf = config[CONF_GPIO_WAKEUP]
-        mask = 0
-        for pin in conf[CONF_PINS]:
-            mask |= 1 << pin[CONF_NUMBER]
-        struct = cg.StructInitializer(
-            GpioWakeup, ("mask", mask), ("wakeup_mode", conf[CONF_MODE])
-        )
-        cg.add(var.set_gpio_wakeup(struct))
 
     if CONF_RUN_DURATION in config:
         run_duration_config = config[CONF_RUN_DURATION]

@@ -69,6 +69,11 @@ void DeepSleepComponent::dump_config_platform_() {
   if (wakeup_pin_ != nullptr) {
     LOG_PIN("  Wakeup Pin: ", this->wakeup_pin_);
   }
+  if (!this->wakeup_pins_.empty()) {
+    for (const auto &item : this->wakeup_pins_) {
+      LOG_PIN("  Wakeup Pin: ", item.wakeup_pin);
+    }
+  }
   if (this->wakeup_cause_to_run_duration_.has_value()) {
     ESP_LOGCONFIG(TAG,
                   "  Default Wakeup Run Duration: %" PRIu32 " ms\n"
@@ -89,6 +94,19 @@ bool DeepSleepComponent::prepare_to_sleep_() {
     }
     this->next_enter_deep_sleep_ = true;
     return false;
+  }
+  if (!this->wakeup_pins_.empty()) {
+    for (auto &item : this->wakeup_pins_) {
+      if (item.wakeup_pin_mode == WAKEUP_PIN_MODE_KEEP_AWAKE && item.wakeup_pin != nullptr &&
+          item.wakeup_pin->digital_read()) {
+        if (!this->next_enter_deep_sleep_) {
+          this->status_set_warning();
+          ESP_LOGW(TAG, "Waiting for pin %u state change to enter deep sleep...", item.wakeup_pin->get_pin());
+        }
+        this->next_enter_deep_sleep_ = true;
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -126,8 +144,20 @@ void DeepSleepComponent::deep_sleep_() {
   // GPIO wakeup - C2, C3, C6, C61 only
 #if defined(USE_ESP32_VARIANT_ESP32C2) || defined(USE_ESP32_VARIANT_ESP32C3) || defined(USE_ESP32_VARIANT_ESP32C6) || \
     defined(USE_ESP32_VARIANT_ESP32C61)
-  if (this->gpio_wakeup_.has_value()) {
-    esp_deep_sleep_enable_gpio_wakeup(this->gpio_wakeup_->mask, this->gpio_wakeup_->wakeup_mode);
+  if (!this->wakeup_pins_.empty()) {
+    // Multiple pins via wakeup_pin list - all share the same wake level
+    uint64_t mask = 0;
+    for (auto &item : this->wakeup_pins_) {
+      const auto gpio_pin = gpio_num_t(item.wakeup_pin->get_pin());
+      gpio_set_direction(gpio_pin, GPIO_MODE_INPUT);
+      mask |= 1ULL << item.wakeup_pin->get_pin();
+    }
+    bool level = this->wakeup_pins_[0].wakeup_level;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(mask, static_cast<esp_sleep_gpio_wake_up_mode_t>(level));
+#else
+    esp_deep_sleep_enable_gpio_wakeup(mask, static_cast<esp_deepsleep_gpio_wake_up_mode_t>(level));
+#endif
   } else if (this->wakeup_pin_ != nullptr) {
     const auto gpio_pin = gpio_num_t(this->wakeup_pin_->get_pin());
     // Make sure GPIO is in input mode, not all RTC GPIO pins are input by default
